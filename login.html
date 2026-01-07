@@ -453,27 +453,54 @@
         <script src="lib/jquery-3.5.1.min.js"></script>
 
     <script>
-        // 定义登录核心逻辑函数 (API请求)
+        // 增强版登录函数 - 带错误侦测
         async function performLogin(handle, password) {
-            // 发送 POST 请求给酒馆后端
-            const response = await fetch('/api/users/login', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    handle: handle,
-                    password: password
-                })
-            });
+            console.log("正在尝试登录:", handle);
+            
+            try {
+                const response = await fetch('/api/users/login', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        handle: handle,
+                        password: password
+                    })
+                });
 
-            if (response.ok) {
-                // 登录成功，跳转到首页
-                window.location.href = '/';
-            } else {
-                // 获取错误信息并抛出
-                const data = await response.json();
-                throw new Error(data.error || 'Login failed - Check server logs');
+                // 先把回应读成纯文本，别急着转 JSON
+                const rawText = await response.text();
+                console.log("服务器回应状态码:", response.status);
+                console.log("服务器回应内容:", rawText.substring(0, 100) + "..."); // 只看前100字
+
+                // 尝试解析 JSON
+                let data;
+                try {
+                    data = JSON.parse(rawText);
+                } catch (e) {
+                    // 如果解析失败，说明返回的根本不是 JSON
+                    // 检查是不是 Cloudflare 错误页或者 Nginx 错误页
+                    if (rawText.includes("Bad Gateway")) {
+                        throw new Error("502 Bad Gateway: 容器可能没启动或正在重启，请检查 Portainer 日志。");
+                    } else if (rawText.includes("Not Found")) {
+                        throw new Error("404 Not Found: 接口路径错误，请检查酒馆版本。");
+                    } else {
+                        // 截取 HTML 标题方便调试
+                        const titleMatch = rawText.match(/<title>(.*?)<\/title>/i);
+                        const title = titleMatch ? titleMatch[1] : "未知 HTML 响应";
+                        throw new Error(`服务器返回了 HTML 而非 JSON: ${title} (状态码: ${response.status})`);
+                    }
+                }
+
+                if (response.ok) {
+                    window.location.href = '/';
+                } else {
+                    throw new Error(data.error || 'Login failed - Check server logs');
+                }
+            } catch (err) {
+                // 直接把刚才捕获的具体错误抛出去
+                throw err;
             }
         }
 
